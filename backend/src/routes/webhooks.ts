@@ -9,6 +9,9 @@ import { aiReplyQueue, transcribeQueue, leadScoreQueue, ivrQueue, enqueueDealAna
 import { payments } from '../services/razorpay';
 import { billing } from '../services/billing';
 import { ai } from '../services/openai';
+import { keywordReply } from '../services/keyword-reply';
+import { sentiment } from '../services/sentiment';
+import { journey } from '../services/journey';
 
 const router = Router();
 
@@ -80,6 +83,26 @@ async function handleInbound(org: any, creds: any, msg: any, contactInfo: any) {
   if (creds && msg.id) whatsapp.markRead(creds, msg.id).catch(() => {});
   emitToOrg(org.id, 'message:new', { message, conversationId: conv.id });
 
+  // Sentiment analysis (async)
+  sentiment.processMessage(org.id, conv.id, contact.id, message.id, text).catch(() => {});
+
+  // Journey log
+  journey.log(org.id, contact.id, 'message', `Inbound: ${text.slice(0, 60)}`, text.slice(0, 200), message.id).catch(() => {});
+
+  // Keyword auto-reply (check before AI)
+  if (text && text.length > 1) {
+    keywordReply.findMatch(org.id, text).then(async (match) => {
+      if (match && creds) {
+        try {
+          await whatsapp.sendText(creds, contact.phone, match.reply_text);
+        } catch {}
+      } else if (org.ai_enabled && conv.ai_enabled && text.length > 1 && ai.enabled) {
+        aiReplyQueue.add('reply', { orgId: org.id, contactId: contact.id, conversationId: conv.id, inboundText: text }).catch(() => {});
+      }
+    }).catch(() => {});
+    return;
+  }
+
   // Trigger deal analysis
   if (ai.enabled && text) enqueueDealAnalyze(org.id, conv.id).catch(() => {});
 
@@ -88,9 +111,7 @@ async function handleInbound(org: any, creds: any, msg: any, contactInfo: any) {
     return;
   }
 
-  if (org.ai_enabled && conv.ai_enabled && text && text.length > 1 && ai.enabled) {
-    aiReplyQueue.add('reply', { orgId: org.id, contactId: contact.id, conversationId: conv.id, inboundText: text }).catch(() => {});
-  }
+  // AI reply handled above by keyword check
 }
 
 async function handleStatus(org: any, st: any) {

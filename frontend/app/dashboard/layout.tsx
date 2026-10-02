@@ -25,6 +25,7 @@ const NAV = [
   { href: '/dashboard/client-love', label: 'Client Love', icon: Heart },
   { href: '/dashboard/seo', label: 'SEO Tools', icon: Search },
   { href: '/dashboard/setup', label: 'WhatsApp Setup', icon: Phone },
+  { href: '/dashboard/mega', label: 'Advanced Features', icon: Sparkles, badge: 'NEW' },
   { href: '/dashboard/payments', label: 'Payments', icon: CreditCard },
   { href: '/dashboard/notifications', label: 'Notifications', icon: Bell },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },

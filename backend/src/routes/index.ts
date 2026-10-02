@@ -14,6 +14,7 @@ import dealRoutes from './deals';
 import followupRoutes from './followups';
 import clientLoveRoutes from './client-love';
 import growthRoutes from './growth';
+import megaRoutes from './mega';
 
 const router = Router();
 router.use('/auth', authRoutes);
@@ -31,4 +32,5 @@ router.use('/deals', dealRoutes);
 router.use('/followups', followupRoutes);
 router.use('/client-love', clientLoveRoutes);
 router.use('/growth', growthRoutes);
+router.use('/mega', megaRoutes);
 export default router;
