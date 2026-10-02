@@ -6,26 +6,26 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   MessageSquare, LayoutDashboard, Users, Megaphone, FileText, Inbox, Bot, Target,
   CreditCard, Settings, LogOut, Menu, Wallet, ChevronRight, X, Search,
-  TrendingUp, Clock, Zap, Phone, Heart, Bell, Sparkles,
+  TrendingUp, Clock, Zap,
 } from 'lucide-react';
 import { api, getToken, clearToken } from '@/lib/api';
 import { connectSocket, disconnectSocket } from '@/lib/socket';
 
 const NAV = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
-  { href: '/dashboard/inbox', label: 'Inbox', icon: Inbox },
-  { href: '/dashboard/pipeline', label: 'Pipeline', icon: TrendingUp },
-  { href: '/dashboard/followups', label: 'Follow-ups', icon: Clock },
+  { href: '/dashboard/setup', label: 'WhatsApp Setup', icon: Phone, badge: 'setup' },
+  { href: '/dashboard/client-love', label: 'Client Love', icon: Heart, badge: 'new' },
+  { href: '/dashboard/inbox', label: 'Inbox', icon: Inbox, badge: 'new' },
+  { href: '/dashboard/pipeline', label: 'Pipeline', icon: TrendingUp, badge: 'new' },
+  { href: '/dashboard/followups', label: 'Follow-ups', icon: Clock, badge: 'new' },
   { href: '/dashboard/campaigns', label: 'Campaigns', icon: Megaphone },
   { href: '/dashboard/templates', label: 'Templates', icon: FileText },
   { href: '/dashboard/contacts', label: 'Contacts', icon: Users },
   { href: '/dashboard/leads', label: 'Leads', icon: Target },
   { href: '/dashboard/ai', label: 'AI Studio', icon: Bot },
-  { href: '/dashboard/growth', label: 'Growth AI', icon: Sparkles },
-  { href: '/dashboard/client-love', label: 'Client Love', icon: Heart },
-  { href: '/dashboard/seo', label: 'SEO Tools', icon: Search },
-  { href: '/dashboard/setup', label: 'WhatsApp Setup', icon: Phone },
+  { href: '/dashboard/growth', label: 'Growth AI', icon: TrendingUp, badge: 'new' },
   { href: '/dashboard/payments', label: 'Payments', icon: CreditCard },
+  { href: '/dashboard/seo', label: 'SEO Tools', icon: Search, badge: 'new' },
   { href: '/dashboard/notifications', label: 'Notifications', icon: Bell },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
@@ -73,6 +73,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const SidebarContent = (
     <div className="h-full flex flex-col bg-white">
+      {/* Header */}
       <div className="h-16 px-5 flex items-center gap-3 border-b border-slate-200/80 shrink-0">
         <Link href="/dashboard" className="flex items-center gap-2.5 min-w-0 flex-1">
           <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-mint grid place-items-center shadow-glow shrink-0">
@@ -88,6 +89,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </button>
       </div>
 
+      {/* Search */}
       <div className="px-3 pt-3 pb-2 shrink-0">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -100,6 +102,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </div>
 
+      {/* Nav */}
       <nav className="flex-1 overflow-y-auto px-3 pb-3 space-y-0.5">
         {filteredNav.map((item) => {
           const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
@@ -113,6 +116,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             >
               <item.icon className={`w-[18px] h-[18px] shrink-0 ${active ? 'text-primary' : 'text-slate-400 group-hover:text-slate-600'}`} strokeWidth={2.2} />
               <span className="truncate flex-1">{item.label}</span>
+              {item.badge === 'new' && !active && (
+                <span className="text-[9px] font-bold uppercase tracking-wider rounded-full bg-mint-50 text-mint-600 px-1.5 py-0.5">AI</span>
+              )}
               {active && <ChevronRight className="w-3.5 h-3.5 text-primary" />}
             </Link>
           );
@@ -122,6 +128,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         )}
       </nav>
 
+      {/* Footer */}
       <div className="p-3 border-t border-slate-200/80 space-y-2 shrink-0">
         <Link href="/dashboard/settings" className="block rounded-xl bg-gradient-to-br from-primary-50 to-mint-50 border border-primary-100 p-3.5 hover:shadow-soft transition-all">
           <div className="flex items-center gap-2 text-[10px] font-bold text-slate-500 tracking-wider">
@@ -149,10 +156,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="min-h-screen bg-canvas flex">
+      {/* Desktop sidebar */}
       <div className="hidden lg:block fixed left-0 top-0 bottom-0 z-30 w-[248px] border-r border-slate-200/80">
         {SidebarContent}
       </div>
 
+      {/* Mobile drawer */}
       <AnimatePresence>
         {open && (
           <>
@@ -174,7 +183,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         )}
       </AnimatePresence>
 
+      {/* Main content */}
       <div className="flex-1 lg:ml-[248px] flex flex-col min-w-0">
+        {/* Topbar */}
         <header className="h-16 sticky top-0 z-20 glass border-b border-slate-200/70 flex items-center gap-3 px-4 sm:px-6 shrink-0">
           <button
             onClick={() => setOpen(true)}
