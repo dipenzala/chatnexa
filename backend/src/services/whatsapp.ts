@@ -93,3 +93,117 @@ export const whatsapp = {
     return data;
   },
 };
+
+/* ============================================================
+   SETUP HELPERS — used by the /setup wizard
+============================================================ */
+
+export const whatsappSetup = {
+  /** Verify that a token + phone number ID actually work */
+  async verifyCredentials(phoneNumberId: string, accessToken: string) {
+    try {
+      const resp = await axios.get(
+        `${env.META_GRAPH_URL}/${env.META_API_VERSION}/${phoneNumberId}`,
+        {
+          params: { fields: 'display_phone_number,verified_name,quality_rating,throughput,platform_type' },
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 15000,
+        }
+      );
+      return { ok: true, data: resp.data };
+    } catch (e: any) {
+      return {
+        ok: false,
+        error: e.response?.data?.error?.message || e.message,
+        code: e.response?.data?.error?.code,
+        fbtrace: e.response?.data?.error?.fbtrace_id,
+      };
+    }
+  },
+
+  /** Register phone number with Cloud API (required for outbound) */
+  async registerNumber(phoneNumberId: string, accessToken: string, pin: string) {
+    try {
+      const resp = await axios.post(
+        `${env.META_GRAPH_URL}/${env.META_API_VERSION}/${phoneNumberId}/register`,
+        {
+          messaging_product: 'whatsapp',
+          pin,
+        },
+        {
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          timeout: 20000,
+        }
+      );
+      return { ok: true, data: resp.data };
+    } catch (e: any) {
+      return { ok: false, error: e.response?.data?.error?.message || e.message };
+    }
+  },
+
+  /** Subscribe our app to the WABA (needed for webhooks) */
+  async subscribeApp(wabaId: string, accessToken: string) {
+    try {
+      const resp = await axios.post(
+        `${env.META_GRAPH_URL}/${env.META_API_VERSION}/${wabaId}/subscribed_apps`,
+        {},
+        { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 15000 }
+      );
+      return { ok: true, data: resp.data };
+    } catch (e: any) {
+      return { ok: false, error: e.response?.data?.error?.message || e.message };
+    }
+  },
+
+  /** Check current app subscription status */
+  async getSubscriptions(wabaId: string, accessToken: string) {
+    try {
+      const resp = await axios.get(
+        `${env.META_GRAPH_URL}/${env.META_API_VERSION}/${wabaId}/subscribed_apps`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 15000 }
+      );
+      return { ok: true, data: resp.data };
+    } catch (e: any) {
+      return { ok: false, error: e.response?.data?.error?.message || e.message };
+    }
+  },
+
+  /** Get the WABA ID from a phone number ID */
+  async getWabaIdFromPhone(phoneNumberId: string, accessToken: string) {
+    try {
+      const resp = await axios.get(
+        `${env.META_GRAPH_URL}/${env.META_API_VERSION}/${phoneNumberId}`,
+        {
+          params: { fields: 'account_mode,display_phone_number,verified_name' },
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 15000,
+        }
+      );
+      return { ok: true, data: resp.data };
+    } catch (e: any) {
+      return { ok: false, error: e.response?.data?.error?.message || e.message };
+    }
+  },
+
+  /** Send a test message to verify end-to-end */
+  async sendTest(phoneNumberId: string, accessToken: string, to: string) {
+    try {
+      const resp = await axios.post(
+        `${env.META_GRAPH_URL}/${env.META_API_VERSION}/${phoneNumberId}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          to: normalizePhone(to),
+          type: 'text',
+          text: { body: '🎉 ChatNexa test message — your WhatsApp API is connected successfully!' },
+        },
+        {
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          timeout: 20000,
+        }
+      );
+      return { ok: true, data: resp.data };
+    } catch (e: any) {
+      return { ok: false, error: e.response?.data?.error?.message || e.message };
+    }
+  },
+};

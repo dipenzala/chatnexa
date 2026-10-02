@@ -13,6 +13,8 @@ import { connectSocket, disconnectSocket } from '@/lib/socket';
 
 const NAV = [
   { href: '/dashboard', label: 'Home', icon: LayoutDashboard },
+  { href: '/dashboard/setup', label: 'WhatsApp Setup', icon: Phone, badge: 'setup' },
+  { href: '/dashboard/client-love', label: 'Client Love', icon: Heart, badge: 'new' },
   { href: '/dashboard/inbox', label: 'Inbox', icon: Inbox, badge: 'new' },
   { href: '/dashboard/pipeline', label: 'Pipeline', icon: TrendingUp, badge: 'new' },
   { href: '/dashboard/followups', label: 'Follow-ups', icon: Clock, badge: 'new' },
@@ -21,7 +23,10 @@ const NAV = [
   { href: '/dashboard/contacts', label: 'Contacts', icon: Users },
   { href: '/dashboard/leads', label: 'Leads', icon: Target },
   { href: '/dashboard/ai', label: 'AI Studio', icon: Bot },
+  { href: '/dashboard/growth', label: 'Growth AI', icon: TrendingUp, badge: 'new' },
   { href: '/dashboard/payments', label: 'Payments', icon: CreditCard },
+  { href: '/dashboard/seo', label: 'SEO Tools', icon: Search, badge: 'new' },
+  { href: '/dashboard/notifications', label: 'Notifications', icon: Bell },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 

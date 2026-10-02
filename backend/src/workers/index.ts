@@ -9,6 +9,7 @@ import { billing } from '../services/billing';
 import { emitToOrg } from '../services/socket';
 import { mailer } from '../services/mailer';
 import { dealAI } from '../services/deal-ai';
+import { clientLove } from '../services/client-love';
 
 const workers: Worker[] = [];
 
@@ -256,6 +257,24 @@ const followupWorker = new Worker(QUEUE_NAMES.FOLLOWUP_RUNNER, async () => {
 }, { connection: conn, concurrency: 1 });
 workers.push(followupWorker);
 attachHandlers(followupWorker);
+
+
+/* ================================================================
+   DAILY CRON — Birthdays + Festivals (runs at 9 AM IST)
+================================================================ */
+const dailyCronWorker = new Worker(QUEUE_NAMES.DAILY_CRON, async () => {
+  logger.info('🌅 Daily cron starting...');
+  try {
+    const birthdays = await clientLove.runBirthdays();
+    logger.info(`🎂 Birthday wishes sent: ${birthdays}`);
+    const festivals = await clientLove.runFestivals();
+    logger.info(`🎉 Festival greetings sent: ${festivals}`);
+  } catch (e: any) {
+    logger.error('daily cron error', e.message);
+  }
+}, { connection: conn, concurrency: 1 });
+workers.push(dailyCronWorker);
+attachHandlers(dailyCronWorker);
 
 logger.info(`✅ ${workers.length} BullMQ workers running (shared connection)`);
 

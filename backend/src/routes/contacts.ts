@@ -146,4 +146,30 @@ router.delete('/:id', asyncHandler(async (req, res) => {
   ok(res);
 }));
 
+
+// GET /contacts/export — CSV export
+router.get('/export', asyncHandler(async (req, res) => {
+  const { rows } = await query(
+    `SELECT phone, name, email, tags, source, opt_in, blocked,
+            loyalty_points, total_spent, birthday, anniversary, created_at
+       FROM contacts WHERE org_id=$1 ORDER BY created_at DESC`,
+    [req.user!.orgId]
+  );
+
+  const headers = ['phone', 'name', 'email', 'tags', 'source', 'opt_in', 'blocked', 'loyalty_points', 'total_spent', 'birthday', 'anniversary', 'created_at'];
+  const csv = [
+    headers.join(','),
+    ...rows.map((r: any) => headers.map((h) => {
+      const val = r[h];
+      if (Array.isArray(val)) return `"\${val.join(';')}"`;
+      if (val === null || val === undefined) return '';
+      return `"\${String(val).replace(/"/g, '""')}"`;
+    }).join(',')),
+  ].join('\n');
+
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="contacts-\${Date.now()}.csv"`);
+  res.send(csv);
+}));
+
 export default router;

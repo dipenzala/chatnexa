@@ -146,3 +146,165 @@ router.post('/upload', asyncHandler(async (req, res) => {
 }));
 
 export default router;
+
+/* ============================================================
+   WHATSAPP API SETUP WIZARD ROUTES
+============================================================ */
+
+// GET /org/whatsapp/setup-status
+// Returns current setup state so the wizard knows which step to show
+router.get('/whatsapp/setup-status', asyncHandler(async (req, res) => {
+  const org = await one<any>(`SELECT * FROM organizations WHERE id=$1`, [req.user!.orgId]);
+  if (!org) throw ApiError.notFound();
+
+  const creds = credsFromOrg(org);
+  const hasCreds = !!creds;
+  const hasWaba = !!org.wa_business_id;
+
+  let live: any = null;
+  if (hasCreds) {
+    const verify = await (await import('../services/whatsapp')).whatsappSetup.verifyCredentials(creds.phoneNumberId, creds.accessToken);
+    if (verify.ok) live = verify.data;
+  }
+
+  let subs: any = null;
+  if (hasCreds && hasWaba) {
+    const s = await (await import('../services/whatsapp')).whatsappSetup.getSubscriptions(org.wa_business_id, creds.accessToken);
+    if (s.ok) subs = s.data;
+  }
+
+  const templateCount = await one<{ count: string }>(
+    `SELECT COUNT(*)::int AS count FROM templates WHERE org_id=$1`,
+    [req.user!.orgId]
+  );
+
+  ok(res, {
+    connected: org.wa_connected,
+    hasCredentials: hasCreds,
+    hasWabaId: hasWaba,
+    phoneNumberId: org.wa_phone_number_id,
+    wabaId: org.wa_business_id,
+    live,
+    subscriptions: subs?.data || [],
+    templateCount: Number(templateCount?.count || 0),
+    webhookUrl: `${env.FRONTEND_URL.replace('3000', '8080')}/api/v1/webhooks/whatsapp`,
+    verifyToken: env.META_VERIFY_TOKEN,
+  });
+}));
+
+// POST /org/whatsapp/verify-token
+// Step 4 — verify credentials before saving
+router.post('/whatsapp/verify-token', asyncHandler(async (req, res) => {
+  const { phoneNumberId, accessToken } = z.object({
+    phoneNumberId: z.string().min(3),
+    accessToken: z.string().min(20),
+  }).parse(req.body);
+
+  const { whatsappSetup } = await import('../services/whatsapp');
+  const result = await whatsappSetup.verifyCredentials(phoneNumberId, accessToken);
+
+  if (!result.ok) {
+    return ok(res, { verified: false, error: result.error, code: result.code });
+  }
+  ok(res, { verified: true, info: result.data });
+}));
+
+// POST /org/whatsapp/connect-v2
+// Saves credentials + auto-fetches WABA ID + subscribes app
+router.post('/whatsapp/connect-v2', asyncHandler(async (req, res) => {
+  const { phoneNumberId, accessToken, businessId, autoSubscribe } = z.object({
+    phoneNumberId: z.string().min(3),
+    accessToken: z.string().min(20),
+    businessId: z.string().optional(),
+    autoSubscribe: z.boolean().default(true),
+  }).parse(req.body);
+
+  const { whatsappSetup } = await import('../services/whatsapp');
+
+  // Verify first
+  const verify = await whatsappSetup.verifyCredentials(phoneNumberId, accessToken);
+  if (!verify.ok) throw ApiError.badRequest(`Invalid credentials: ${verify.error}`);
+
+  // Try to auto-detect WABA ID if not provided
+  let wabaId = businessId;
+  if (!wabaId) {
+    const wabaInfo = await whatsappSetup.getWabaIdFromPhone(phoneNumberId, accessToken);
+    if (wabaInfo.ok) wabaId = wabaInfo.data?.id;
+  }
+
+  // Save credentials
+  await query(
+    `UPDATE organizations SET
+       wa_phone_number_id=$2,
+       wa_access_token=$3,
+       wa_business_id=$4,
+       wa_connected=TRUE
+     WHERE id=$1`,
+    [req.user!.orgId, phoneNumberId, encrypt(accessToken), wabaId ?? null]
+  );
+
+  // Auto-subscribe app to WABA
+  let subscription = null;
+  if (autoSubscribe && wabaId) {
+    const sub = await whatsappSetup.subscribeApp(wabaId, accessToken);
+    subscription = sub;
+  }
+
+  ok(res, {
+    connected: true,
+    phoneNumberId,
+    wabaId,
+    info: verify.data,
+    subscription: subscription?.ok ? 'subscribed' : 'failed',
+  });
+}));
+
+// POST /org/whatsapp/register-number
+// Registers phone with a 6-digit PIN (required for outbound)
+router.post('/whatsapp/register-number', asyncHandler(async (req, res) => {
+  const { pin } = z.object({
+    pin: z.string().length(6).regex(/^\d{6}$/),
+  }).parse(req.body);
+
+  const org = await one<any>(`SELECT * FROM organizations WHERE id=$1`, [req.user!.orgId]);
+  const creds = credsFromOrg(org);
+  if (!creds) throw ApiError.badRequest('Connect WhatsApp first');
+
+  const { whatsappSetup } = await import('../services/whatsapp');
+  const result = await whatsappSetup.registerNumber(creds.phoneNumberId, creds.accessToken, pin);
+
+  if (!result.ok) throw ApiError.badRequest(result.error);
+  ok(res, { registered: true });
+}));
+
+// POST /org/whatsapp/subscribe-webhook
+// Re-subscribe app to WABA (idempotent)
+router.post('/whatsapp/subscribe-webhook', asyncHandler(async (req, res) => {
+  const org = await one<any>(`SELECT * FROM organizations WHERE id=$1`, [req.user!.orgId]);
+  const creds = credsFromOrg(org);
+  if (!creds || !org.wa_business_id) throw ApiError.badRequest('Need WABA ID — connect WhatsApp first');
+
+  const { whatsappSetup } = await import('../services/whatsapp');
+  const result = await whatsappSetup.subscribeApp(org.wa_business_id, creds.accessToken);
+
+  if (!result.ok) throw ApiError.badRequest(result.error);
+  ok(res, { subscribed: true });
+}));
+
+// POST /org/whatsapp/send-test
+// Sends a test message to a phone number
+router.post('/whatsapp/send-test', asyncHandler(async (req, res) => {
+  const { to } = z.object({
+    to: z.string().min(10),
+  }).parse(req.body);
+
+  const org = await one<any>(`SELECT * FROM organizations WHERE id=$1`, [req.user!.orgId]);
+  const creds = credsFromOrg(org);
+  if (!creds) throw ApiError.badRequest('Connect WhatsApp first');
+
+  const { whatsappSetup } = await import('../services/whatsapp');
+  const result = await whatsappSetup.sendTest(creds.phoneNumberId, creds.accessToken, to);
+
+  if (!result.ok) throw ApiError.badRequest(result.error);
+  ok(res, { sent: true, messageId: result.data?.messages?.[0]?.id });
+}));

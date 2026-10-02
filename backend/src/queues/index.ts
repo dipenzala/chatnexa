@@ -20,6 +20,7 @@ export const QUEUE_NAMES = {
   IVR: 'ivr',
   DEAL_ANALYZE: 'deal-analyze',
   FOLLOWUP_RUNNER: 'followup-runner',
+  DAILY_CRON: 'daily-cron',
 } as const;
 
 export const campaignQueue = new Queue(QUEUE_NAMES.CAMPAIGN, opts);
@@ -30,6 +31,7 @@ export const leadScoreQueue = new Queue(QUEUE_NAMES.LEAD_SCORE, opts);
 export const ivrQueue = new Queue(QUEUE_NAMES.IVR, opts);
 export const dealAnalyzeQueue = new Queue(QUEUE_NAMES.DEAL_ANALYZE, opts);
 export const followupQueue = new Queue(QUEUE_NAMES.FOLLOWUP_RUNNER, opts);
+export const dailyCronQueue = new Queue(QUEUE_NAMES.DAILY_CRON, opts);
 
 export async function enqueueCampaign(campaignId: string, orgId: string, delayMs = 0) {
   return campaignQueue.add('broadcast', { campaignId, orgId }, { delay: delayMs, jobId: `campaign:${campaignId}` });
@@ -39,4 +41,7 @@ export async function enqueueDealAnalyze(orgId: string, conversationId: string) 
 }
 export async function enqueueFollowupTick() {
   return followupQueue.add('tick', {}, { repeat: { every: 5 * 60 * 1000 }, jobId: 'followup-tick' });
+}
+export async function enqueueDailyCron() {
+  return dailyCronQueue.add('daily', {}, { repeat: { pattern: '0 9 * * *' }, jobId: 'daily-9am' });
 }
