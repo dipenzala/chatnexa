@@ -1,0 +1,17 @@
+{
+  "name": "chatnexa",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": ["backend", "frontend"],
+  "scripts": {
+    "setup": "npm install && npm run db:migrate",
+    "dev": "concurrently -n API,WEB,WORKER -c blue,green,magenta \"npm:dev:api\" \"npm:dev:web\" \"npm:dev:worker\"",
+    "dev:api": "npm --workspace backend run dev",
+    "dev:web": "npm --workspace frontend run dev",
+    "dev:worker": "npm --workspace backend run worker",
+    "build": "npm --workspace backend run build && npm --workspace frontend run build",
+    "start": "concurrently -n API,WEB,WORKER -c blue,green,magenta \"npm --workspace backend run start\" \"npm --workspace frontend run start\" \"npm --workspace backend run worker:prod\"",
+    "db:migrate": "npm --workspace backend run migrate"
+  },
+  "devDependencies": { "concurrently": "^8.2.2" }
+}
