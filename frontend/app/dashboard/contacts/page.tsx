@@ -16,7 +16,7 @@ export default function Contacts() {
   const [error, setError] = useState('');
 
   const key = `/api/v1/contacts?page=${page}&limit=25${search ? `&search=${encodeURIComponent(search)}` : ''}`;
-  const { data, mutate, isLoading } = useSWR(key, api.get, { keepPreviousData: true });
+  const { data, mutate, isLoading } = useSWR<any>(key, api.get, { keepPreviousData: true });
 
   async function addContact(e: React.FormEvent) {
     e.preventDefault(); setError(''); setBusy(true);

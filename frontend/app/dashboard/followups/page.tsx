@@ -5,8 +5,8 @@ import { Clock, Power, Trash2, Zap } from 'lucide-react';
 import { api } from '@/lib/api';
 
 export default function FollowupsPage() {
-  const { data: seqs, mutate } = useSWR('/api/v1/followups/sequences', api.get);
-  const { data: queue } = useSWR('/api/v1/followups/queue', api.get, { refreshInterval: 20000 });
+  const { data: seqs, mutate } = useSWR<any>('/api/v1/followups/sequences', api.get);
+  const { data: queue } = useSWR<any>('/api/v1/followups/queue', api.get, { refreshInterval: 20000 });
 
   async function toggle(id: string) {
     await api.post(`/api/v1/followups/sequences/${id}/toggle`, {});

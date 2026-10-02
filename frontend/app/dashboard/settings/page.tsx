@@ -5,10 +5,10 @@ import { Loader2, Check, AlertCircle, Wallet, Key, Bot, Phone, Users, Plus } fro
 import { api } from '@/lib/api';
 
 export default function Settings() {
-  const { data: org, mutate } = useSWR('/api/v1/org', api.get);
-  const { data: wallet, mutate: mutateWallet } = useSWR('/api/v1/org/wallet', api.get);
-  const { data: team, mutate: mutateTeam } = useSWR('/api/v1/auth/team', api.get);
-  const { data: keys, mutate: mutateKeys } = useSWR('/api/v1/org/api-keys', api.get);
+  const { data: org, mutate } = useSWR<any>('/api/v1/org', api.get);
+  const { data: wallet, mutate: mutateWallet } = useSWR<any>('/api/v1/org/wallet', api.get);
+  const { data: team, mutate: mutateTeam } = useSWR<any>('/api/v1/auth/team', api.get);
+  const { data: keys, mutate: mutateKeys } = useSWR<any>('/api/v1/org/api-keys', api.get);
 
   const [tab, setTab] = useState<'whatsapp' | 'wallet' | 'ai' | 'team' | 'api'>('whatsapp');
   const [wa, setWa] = useState({ phoneNumberId: '', accessToken: '', businessId: '' });

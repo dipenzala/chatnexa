@@ -11,8 +11,8 @@ export default function Leads() {
   const [status, setStatus] = useState('');
   const [search, setSearch] = useState('');
 
-  const { data, mutate } = useSWR(`/api/v1/leads?limit=100${status ? `&status=${status}` : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}`, api.get, { refreshInterval: 15000 });
-  const { data: stats } = useSWR('/api/v1/leads/stats', api.get, { refreshInterval: 30000 });
+  const { data, mutate } = useSWR<any>(`/api/v1/leads?limit=100${status ? `&status=${status}` : ''}${search ? `&search=${encodeURIComponent(search)}` : ''}`, api.get, { refreshInterval: 15000 });
+  const { data: stats } = useSWR<any>('/api/v1/leads/stats', api.get, { refreshInterval: 30000 });
 
   async function updateStatus(id: string, newStatus: string) { await api.patch(`/api/v1/leads/${id}`, { status: newStatus }); mutate(); }
   async function convert(id: string) {

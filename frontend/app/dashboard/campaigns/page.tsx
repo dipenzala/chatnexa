@@ -6,8 +6,8 @@ import { Plus, Play, Pause, X, Loader2, Megaphone } from 'lucide-react';
 import { api } from '@/lib/api';
 
 export default function Campaigns() {
-  const { data, mutate, isLoading } = useSWR('/api/v1/campaigns?limit=50', api.get, { refreshInterval: 8000 });
-  const { data: templates } = useSWR('/api/v1/templates?limit=100', api.get);
+  const { data, mutate, isLoading } = useSWR<any>('/api/v1/campaigns?limit=50', api.get, { refreshInterval: 8000 });
+  const { data: templates } = useSWR<any>('/api/v1/templates?limit=100', api.get);
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

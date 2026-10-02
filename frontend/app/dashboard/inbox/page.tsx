@@ -14,8 +14,8 @@ export default function Inbox() {
   const [summary, setSummary] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  const { data: convData, mutate: mutateConv } = useSWR(`/api/v1/inbox/conversations?limit=50${search ? `&search=${encodeURIComponent(search)}` : ''}`, api.get, { refreshInterval: 10000 });
-  const { data: msgData, mutate: mutateMsgs } = useSWR(selected ? `/api/v1/inbox/conversations/${selected}/messages` : null, api.get, { refreshInterval: 5000 });
+  const { data: convData, mutate: mutateConv } = useSWR<any>(`/api/v1/inbox/conversations?limit=50${search ? `&search=${encodeURIComponent(search)}` : ''}`, api.get, { refreshInterval: 10000 });
+  const { data: msgData, mutate: mutateMsgs } = useSWR<any>(selected ? `/api/v1/inbox/conversations/${selected}/messages` : null, api.get, { refreshInterval: 5000 });
 
   useEffect(() => {
     const socket = getSocket();

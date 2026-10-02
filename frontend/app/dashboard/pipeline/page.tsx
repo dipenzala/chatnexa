@@ -16,7 +16,7 @@ const STAGES = [
 ];
 
 export default function PipelinePage() {
-  const { data, mutate } = useSWR('/api/v1/deals/pipeline', api.get, { refreshInterval: 15000 });
+  const { data, mutate } = useSWR<any>('/api/v1/deals/pipeline', api.get, { refreshInterval: 15000 });
 
   const deals = data?.deals ?? [];
 

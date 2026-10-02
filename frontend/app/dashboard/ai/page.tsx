@@ -6,8 +6,8 @@ import { Plus, Trash2, Bot, Loader2, Send, Database, Sparkles } from 'lucide-rea
 import { api } from '@/lib/api';
 
 export default function AIStudio() {
-  const { data: kb, mutate } = useSWR('/api/v1/ai/knowledge', api.get);
-  const { data: usage } = useSWR('/api/v1/ai/usage', api.get);
+  const { data: kb, mutate } = useSWR<any>('/api/v1/ai/knowledge', api.get);
+  const { data: usage } = useSWR<any>('/api/v1/ai/usage', api.get);
   const [showAdd, setShowAdd] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

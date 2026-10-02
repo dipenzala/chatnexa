@@ -6,7 +6,7 @@ import { Plus, FileText, Trash2, X, Loader2, RefreshCw } from 'lucide-react';
 import { api } from '@/lib/api';
 
 export default function Templates() {
-  const { data, mutate, isLoading } = useSWR('/api/v1/templates?limit=100', api.get);
+  const { data, mutate, isLoading } = useSWR<any>('/api/v1/templates?limit=100', api.get);
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

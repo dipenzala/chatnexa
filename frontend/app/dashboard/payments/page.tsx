@@ -5,9 +5,9 @@ import { CreditCard, Plus, Loader2, X, Copy } from 'lucide-react';
 import { api } from '@/lib/api';
 
 export default function Payments() {
-  const { data, mutate } = useSWR('/api/v1/payments?limit=50', api.get);
-  const { data: stats } = useSWR('/api/v1/payments/stats', api.get);
-  const { data: contacts } = useSWR('/api/v1/contacts?limit=200', api.get);
+  const { data, mutate } = useSWR<any>('/api/v1/payments?limit=50', api.get);
+  const { data: stats } = useSWR<any>('/api/v1/payments/stats', api.get);
+  const { data: contacts } = useSWR<any>('/api/v1/contacts?limit=200', api.get);
   const [showNew, setShowNew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');

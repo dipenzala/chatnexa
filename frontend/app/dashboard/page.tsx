@@ -6,10 +6,10 @@ import { Users, MessageSquare, Megaphone, Target, TrendingUp, Wallet, ArrowRight
 import { api } from '@/lib/api';
 
 export default function DashboardHome() {
-  const { data: me } = useSWR('/api/v1/auth/me', api.get);
-  const { data: overview, isLoading } = useSWR('/api/v1/analytics/overview', api.get, { refreshInterval: 20000 });
-  const { data: hot } = useSWR('/api/v1/deals/hot', api.get, { refreshInterval: 20000 });
-  const { data: followups } = useSWR('/api/v1/followups/queue', api.get, { refreshInterval: 30000 });
+  const { data: me } = useSWR<any>('/api/v1/auth/me', api.get);
+  const { data: overview, isLoading } = useSWR<any>('/api/v1/analytics/overview', api.get, { refreshInterval: 20000 });
+  const { data: hot } = useSWR<any>('/api/v1/deals/hot', api.get, { refreshInterval: 20000 });
+  const { data: followups } = useSWR<any>('/api/v1/followups/queue', api.get, { refreshInterval: 30000 });
 
   const firstName = (me?.user?.name || '').split(' ')[0] || 'there';
 
