@@ -180,7 +180,7 @@ router.post('/exotel/status', asyncHandler(async (req, res) => {
        VALUES ($1,$2,$3,'inbound',$4,$5,$6,$7,$8) RETURNING *`,
       [org.id, contact?.id ?? null, CallSid, phone, normalizePhone(To), Number(ConversationDuration || 0), RecordingUrl ?? null, Status || 'completed']
     );
-    if (RecordingUrl) ivrQueue.add('transcribe', { callId: call.id, orgId: org.id, recordingUrl }).catch(() => {});
+    if (RecordingUrl) ivrQueue.add('transcribe', { callId: call.id, orgId: org.id, RecordingUrl }).catch(() => {});
     emitToOrg(org.id, 'ivr:call', { call });
   } catch (e: any) { logger.error('exotel error', e.message); }
 }));
