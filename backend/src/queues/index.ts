@@ -3,7 +3,12 @@ import { bullConnection } from '../redis/client';
 
 const opts: QueueOptions = {
   connection: bullConnection as any,
-  defaultJobOptions: { attempts: 3, backoff: { type: 'exponential', delay: 5_000 }, removeOnComplete: { count: 500 }, removeOnFail: { count: 1000 } },
+  defaultJobOptions: {
+    attempts: 3,
+    backoff: { type: 'exponential', delay: 5000 },
+    removeOnComplete: { count: 500 },
+    removeOnFail: { count: 1000 },
+  },
 };
 
 export const QUEUE_NAMES = {

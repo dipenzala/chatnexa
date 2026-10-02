@@ -1,5 +1,5 @@
 import { Worker, Job } from 'bullmq';
-import { createBullConnection } from '../redis/client';
+import { bullConnection } from '../redis/client';
 import { QUEUE_NAMES } from '../queues';
 import { logger } from '../lib/logger';
 import { one, query, many } from '../db/pool';
@@ -12,39 +12,35 @@ import { dealAI } from '../services/deal-ai';
 
 const workers: Worker[] = [];
 
-/** Helper: attach error handlers that throttle ECONNRESET noise */
+// Shared connection for ALL workers — BullMQ v5 supports this
+const conn = bullConnection as any;
+
+/** Throttled error handler — silence ECONNRESET spam */
 function attachHandlers(w: Worker) {
   let lastErr = 0;
-  w.on('failed', (job, err) => {
-    if (err.message?.includes('ECONNRESET')) return;
-    logger.error(`[${w.name}] job ${job?.id} failed: ${err.message}`);
-  });
-  w.on('error', (err) => {
-    // ECONNRESET from Upstash idle-kill is normal — throttle and downgrade
-    if (err.message?.includes('ECONNRESET') || err.message?.includes('EPIPE')) {
-      const now = Date.now();
-      if (now - lastErr > 60000) {
-        logger.warn(`[${w.name}] redis idle-reset (auto-reconnecting)`);
-        lastErr = now;
-      }
-      return;
-    }
-    logger.error(`[${w.name}] error: ${err.message}`);
-  });
-}
-
-/** Fresh connection per worker — BullMQ needs blocking-safe conns */
-function workerOptions(concurrency: number, limiter?: { max: number; duration: number }) {
-  return {
-    connection: createBullConnection(),
-    concurrency,
-    ...(limiter ? { limiter } : {}),
+  const throttle = (msg: string, level: 'info' | 'warn' | 'error' = 'error') => {
+    const now = Date.now();
+    if (now - lastErr < 30000) return;
+    lastErr = now;
+    if (level === 'error') logger.error(`[${w.name}] ${msg}`);
+    else if (level === 'warn') logger.warn(`[${w.name}] ${msg}`);
+    else logger.info(`[${w.name}] ${msg}`);
   };
+
+  w.on('failed', (job, err) => {
+    if (err.message?.includes('ECONNRESET') || err.message?.includes('EPIPE')) return;
+    throttle(`job ${job?.id} failed: ${err.message}`, 'error');
+  });
+
+  w.on('error', (err) => {
+    if (err.message?.includes('ECONNRESET') || err.message?.includes('EPIPE')) return;
+    throttle(err.message, 'warn');
+  });
 }
 
-/* ------------------------------------------------------------------
+/* ================================================================
    CAMPAIGN
------------------------------------------------------------------- */
+================================================================ */
 const campaignWorker = new Worker(QUEUE_NAMES.CAMPAIGN, async (job: Job) => {
   const { campaignId, orgId } = job.data as { campaignId: string; orgId: string };
   const campaign = await one<any>(`SELECT * FROM campaigns WHERE id = $1 AND org_id = $2`, [campaignId, orgId]);
@@ -92,13 +88,13 @@ const campaignWorker = new Worker(QUEUE_NAMES.CAMPAIGN, async (job: Job) => {
   }
   await query(`UPDATE campaigns SET status='completed', completed_at=NOW() WHERE id=$1`, [campaignId]);
   emitToOrg(orgId, 'campaign:completed', { campaignId });
-}, workerOptions(3));
+}, { connection: conn, concurrency: 3 });
 workers.push(campaignWorker);
 attachHandlers(campaignWorker);
 
-/* ------------------------------------------------------------------
-   AI auto-reply
------------------------------------------------------------------- */
+/* ================================================================
+   AI REPLY
+================================================================ */
 const aiWorker = new Worker(QUEUE_NAMES.AI_REPLY, async (job: Job) => {
   const { orgId, contactId, conversationId, inboundText } = job.data;
   const org = await one<any>(`SELECT * FROM organizations WHERE id=$1`, [orgId]);
@@ -127,48 +123,48 @@ const aiWorker = new Worker(QUEUE_NAMES.AI_REPLY, async (job: Job) => {
   );
   await query(`UPDATE conversations SET last_message=$2, last_message_at=NOW() WHERE id=$1`, [conversationId, result.text]);
   emitToOrg(orgId, 'message:new', { message: rows[0], conversationId });
-}, workerOptions(5));
+}, { connection: conn, concurrency: 5 });
 workers.push(aiWorker);
 attachHandlers(aiWorker);
 
-/* ------------------------------------------------------------------
-   Transcribe
------------------------------------------------------------------- */
+/* ================================================================
+   TRANSCRIBE
+================================================================ */
 const transcribeWorker = new Worker(QUEUE_NAMES.TRANSCRIBE, async (job: Job) => {
   const { orgId, messageId, bufferBase64, filename } = job.data;
   const text = await ai.transcribe(Buffer.from(bufferBase64, 'base64'), filename);
   if (!text) return;
   await query(`UPDATE messages SET body = COALESCE(body,'') || $2 WHERE id=$1`, [messageId, `\n[transcript] ${text}`]);
   emitToOrg(orgId, 'message:transcribed', { messageId, text });
-}, workerOptions(3));
+}, { connection: conn, concurrency: 3 });
 workers.push(transcribeWorker);
 attachHandlers(transcribeWorker);
 
-/* ------------------------------------------------------------------
-   Email
------------------------------------------------------------------- */
+/* ================================================================
+   EMAIL
+================================================================ */
 const emailWorker = new Worker(QUEUE_NAMES.EMAIL, async (job: Job) => {
   const { to, subject, html } = job.data;
   await mailer.send(to, subject, html);
-}, workerOptions(10));
+}, { connection: conn, concurrency: 10 });
 workers.push(emailWorker);
 attachHandlers(emailWorker);
 
-/* ------------------------------------------------------------------
-   Lead score
------------------------------------------------------------------- */
+/* ================================================================
+   LEAD SCORE
+================================================================ */
 const leadScoreWorker = new Worker(QUEUE_NAMES.LEAD_SCORE, async (job: Job) => {
   const { leadId, orgId, payload } = job.data;
   const score = await ai.scoreLead(payload);
   await query(`UPDATE leads SET score=$2 WHERE id=$1`, [leadId, score]);
   emitToOrg(orgId, 'lead:scored', { leadId, score });
-}, workerOptions(5));
+}, { connection: conn, concurrency: 5 });
 workers.push(leadScoreWorker);
 attachHandlers(leadScoreWorker);
 
-/* ------------------------------------------------------------------
+/* ================================================================
    IVR
------------------------------------------------------------------- */
+================================================================ */
 const ivrWorker = new Worker(QUEUE_NAMES.IVR, async (job: Job) => {
   const { callId, orgId, recordingUrl } = job.data;
   if (recordingUrl && ai.enabled) {
@@ -179,24 +175,24 @@ const ivrWorker = new Worker(QUEUE_NAMES.IVR, async (job: Job) => {
       if (text) { await query(`UPDATE ivr_calls SET transcript=$2 WHERE id=$1`, [callId, text]); emitToOrg(orgId, 'ivr:transcribed', { callId, text }); }
     } catch {}
   }
-}, workerOptions(2));
+}, { connection: conn, concurrency: 2 });
 workers.push(ivrWorker);
 attachHandlers(ivrWorker);
 
-/* ------------------------------------------------------------------
-   Deal analyze
------------------------------------------------------------------- */
+/* ================================================================
+   DEAL ANALYZE
+================================================================ */
 const dealWorker = new Worker(QUEUE_NAMES.DEAL_ANALYZE, async (job: Job) => {
   const { orgId, conversationId } = job.data;
   const signal = await dealAI.analyze(orgId, conversationId);
   if (signal) emitToOrg(orgId, 'deal:updated', { conversationId, signal });
-}, workerOptions(3));
+}, { connection: conn, concurrency: 3 });
 workers.push(dealWorker);
 attachHandlers(dealWorker);
 
-/* ------------------------------------------------------------------
-   Follow-up runner
------------------------------------------------------------------- */
+/* ================================================================
+   FOLLOW-UP RUNNER
+================================================================ */
 const followupWorker = new Worker(QUEUE_NAMES.FOLLOWUP_RUNNER, async () => {
   const due = await many<any>(
     `SELECT fq.*, c.contact_id, ct.phone, ct.name AS contact_name, fq.sequence_id
@@ -257,11 +253,11 @@ const followupWorker = new Worker(QUEUE_NAMES.FOLLOWUP_RUNNER, async () => {
       await query(`UPDATE followup_queue SET status='failed' WHERE id=$1`, [row.id]);
     }
   }
-}, workerOptions(1));
+}, { connection: conn, concurrency: 1 });
 workers.push(followupWorker);
 attachHandlers(followupWorker);
 
-logger.info(`✅ ${workers.length} BullMQ workers running`);
+logger.info(`✅ ${workers.length} BullMQ workers running (shared connection)`);
 
 export async function closeWorkers() {
   await Promise.all(workers.map((w) => w.close()));

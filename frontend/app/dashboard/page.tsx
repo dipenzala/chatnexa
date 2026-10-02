@@ -2,10 +2,7 @@
 import useSWR from 'swr';
 import Link from 'next/link';
 import { motion } from 'framer-motion';
-import {
-  Users, MessageSquare, Megaphone, Target, TrendingUp, Wallet, ArrowRight,
-  Flame, Clock, Plus, Sparkles, Send, UserPlus, Zap, Bot, BarChart3,
-} from 'lucide-react';
+import { Users, MessageSquare, Megaphone, Target, TrendingUp, Wallet, ArrowRight, Flame, Clock, Plus, Sparkles, Send, UserPlus, Zap, Bot, BarChart3, Brain } from 'lucide-react';
 import { api } from '@/lib/api';
 
 export default function DashboardHome() {
