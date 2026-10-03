@@ -207,3 +207,17 @@ export const whatsappSetup = {
     }
   },
 };
+
+export async function sendMessageSmart(
+  org: any, to: string, type: 'text' | 'template', payload: any
+): Promise<string | null> {
+  if (org?.bsp_provider && org.bsp_provider !== 'direct' && org.bsp_api_key_encrypted) {
+    const { bsp } = await import('./bsp');
+    if (type === 'text') return await bsp.sendText(org.id, to, payload.text);
+    return await bsp.sendTemplate(org.id, to, payload.name, payload.language, payload.bodyParams || []);
+  }
+  const creds = credsFromOrg(org);
+  if (!creds) throw new Error('WhatsApp not connected');
+  if (type === 'text') return await whatsapp.sendText(creds, to, payload.text);
+  return await whatsapp.sendTemplate(creds, to, payload.name, payload.language, payload.bodyParams || [], payload.headerParams || []);
+}

@@ -1,13 +1,13 @@
-node_modules
-dist
-.next
+node_modules/
+.next/
+dist/
 .env
 .env.local
+.env.*.local
+backend/.env
+frontend/.env.local
 *.log
 .DS_Store
-coverage
-
-# ChatNexa backups
 .backup-*
 .broken-*
 .page-backup-*
@@ -15,4 +15,6 @@ coverage
 .pricing-backup-*
 .ultra-backup-*
 .wa-backup-*
+.dash-backup-*
 *.bak
+coverage/

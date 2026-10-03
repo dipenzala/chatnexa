@@ -6,9 +6,9 @@ export const pool = new Pool({
   connectionString: env.DATABASE_URL,
   max: 15,
   idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 25_000,
-  keepAlive: true,
-  keepAliveInitialDelayMillis: 10_000,
+  connectionTimeoutMillis: 10_000,
+  statement_timeout: 30_000,
+  query_timeout: 30_000,
   ssl: env.DATABASE_URL.includes('neon.tech') ? { rejectUnauthorized: false } : undefined,
 });
 pool.on('error', (e) => logger.warn('pg pool warn:', e.message));
@@ -31,8 +31,7 @@ export async function tx<T>(fn: (c: any) => Promise<T>): Promise<T> {
 export async function waitForDb(retries = 6): Promise<boolean> {
   for (let i = 1; i <= retries; i++) {
     try { await pool.query('SELECT 1'); logger.info('✅ postgres connected'); return true; }
-    catch (e: any) { logger.warn(`postgres attempt ${i}/${retries} — ${e.message}`); await new Promise((r) => setTimeout(r, 3000)); }
+    catch (e: any) { logger.warn(`postgres attempt ${i}/${retries}`); await new Promise((r) => setTimeout(r, 3000)); }
   }
-  logger.error('❌ postgres failed after retries');
   return false;
 }

@@ -1,3 +1,4 @@
+import { env } from '../config/env';
 import { Router } from 'express';
 import { z } from 'zod';
 import { one, query } from '../db/pool';

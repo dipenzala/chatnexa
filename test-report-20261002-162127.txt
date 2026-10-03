@@ -1,0 +1,11 @@
+ChatNexa Test Report
+Generated: Fri, Oct  2, 2026  4:21:29 PM
+
+Passed: 2
+Failed: 79
+Warnings: 6
+Total: 87
+Completion: 2%
+
+API tested at: http://localhost:8080
+Web tested at: http://localhost:3000
