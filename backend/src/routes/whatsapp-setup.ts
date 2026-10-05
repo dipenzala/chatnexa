@@ -1,190 +1,132 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { z } from 'zod';
 import axios from 'axios';
-import { one, query } from '../db/pool';
 import { ApiError, asyncHandler, ok } from '../lib/http';
 import { requireAuth } from '../middleware/auth';
-import { encrypt } from '../lib/crypto';
 import { env } from '../config/env';
 import { logger } from '../lib/logger';
 
 const router = Router();
+
+// Log every hit for debugging
+router.use((req: Request, _res: Response, next) => {
+  logger.info(`[WA-Setup Route] ${req.method} ${req.originalUrl}`);
+  next();
+});
+
 router.use(requireAuth);
 
 /**
  * POST /api/v1/org/whatsapp/verify-token
- * Verifies Meta WhatsApp Cloud API credentials without storing them
  */
-router.post('/verify-token', asyncHandler(async (req, res) => {
+router.post('/verify-token', asyncHandler(async (req: Request, res: Response) => {
   const { phoneNumberId, accessToken, wabaId } = z.object({
-    phoneNumberId: z.string().min(3).regex(/^\d+$/, 'Phone Number ID must be numeric'),
+    phoneNumberId: z.string().min(3),
     accessToken: z.string().min(20),
     wabaId: z.string().optional(),
   }).parse(req.body);
 
-  // Safe logging (never log the token)
-  logger.info(`[WA Verify] tenant=${req.user!.orgId} phoneNumberId=${phoneNumberId.slice(0, 6)}...`);
+  logger.info(`[WA Verify] tenant=${req.user!.orgId} phone=${phoneNumberId.slice(0, 6)}...`);
 
   try {
-    const url = `https://graph.facebook.com/${env.META_API_VERSION}/${phoneNumberId}`;
-    const resp = await axios.get(url, {
-      params: { fields: 'display_phone_number,verified_name,quality_rating,platform_type,account_mode' },
-      headers: { Authorization: `Bearer ${accessToken}` },
-      timeout: 15000,
-    });
-
-    const data = resp.data || {};
-
-    // Try to auto-detect WABA ID from phone number's associated WABA
-    let detectedWabaId: string | null = null;
-    if (!wabaId) {
-      try {
-        // Try the phone_numbers endpoint to find WABA
-        const wabaResp = await axios.get(
-          `https://graph.facebook.com/${env.META_API_VERSION}/${phoneNumberId}?fields=id,display_phone_number`,
-          { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
-        );
-        detectedWabaId = wabaResp.data?.id || null;
-      } catch {
-        // WABA detection failed — not critical
+    const resp = await axios.get(
+      `https://graph.facebook.com/${env.META_API_VERSION}/${phoneNumberId}`,
+      {
+        params: { fields: 'display_phone_number,verified_name,quality_rating,platform_type' },
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 15000,
       }
-    }
+    );
 
     return ok(res, {
       verified: true,
       info: {
-        display_phone_number: data.display_phone_number,
-        verified_name: data.verified_name,
-        quality_rating: data.quality_rating,
-        platform_type: data.platform_type,
-        account_mode: data.account_mode,
+        display_phone_number: resp.data?.display_phone_number,
+        verified_name: resp.data?.verified_name,
+        quality_rating: resp.data?.quality_rating,
+        platform_type: resp.data?.platform_type,
       },
-      wabaId: wabaId || detectedWabaId,
-      autoDetected: !wabaId && !!detectedWabaId,
+      wabaId: wabaId || null,
     });
   } catch (e: any) {
-    const metaError = e.response?.data?.error || {};
     const status = e.response?.status;
-
-    // Differentiate error types
+    const metaErr = e.response?.data?.error || {};
     let code = 'META_UNKNOWN_ERROR';
-    let message = 'Could not verify credentials with Meta.';
+    let message = 'Could not verify with Meta.';
 
     if (e.code === 'ECONNABORTED' || e.code === 'ETIMEDOUT') {
       code = 'META_TIMEOUT';
-      message = 'Meta API is not responding. Please try again.';
-    } else if (e.code === 'ENOTFOUND' || e.code === 'ECONNREFUSED') {
-      code = 'META_UNREACHABLE';
-      message = 'Cannot reach Meta API. Check your internet connection.';
+      message = 'Meta API timeout. Please try again.';
     } else if (status === 401) {
       code = 'META_AUTH_ERROR';
       message = 'Access token is invalid or expired. Generate a new permanent token.';
     } else if (status === 403) {
       code = 'META_FORBIDDEN';
-      message = 'Token does not have the required permissions for WhatsApp Business API.';
+      message = 'Token does not have required WhatsApp permissions.';
     } else if (status === 404) {
       code = 'META_NOT_FOUND';
-      message = 'Phone Number ID not found. Verify it from Meta App Dashboard → WhatsApp → API Setup.';
+      message = 'Phone Number ID not found. Check Meta dashboard.';
     } else if (status === 400) {
       code = 'META_BAD_REQUEST';
-      message = metaError.message || 'Invalid Phone Number ID or request format.';
+      message = metaErr.message || 'Invalid credentials format.';
     } else if (status === 429) {
       code = 'META_RATE_LIMIT';
-      message = 'Too many requests to Meta. Please wait a moment and try again.';
-    } else if (status >= 500) {
-      code = 'META_SERVER_ERROR';
-      message = 'Meta API is having issues. Please try again later.';
-    } else if (metaError.message) {
-      message = metaError.message;
+      message = 'Too many requests to Meta. Wait a moment.';
+    } else if (metaErr.message) {
+      message = metaErr.message;
     }
 
-    logger.warn(`[WA Verify] failed tenant=${req.user!.orgId} code=${code} status=${status} msg=${message}`);
+    logger.warn(`[WA Verify] FAILED code=${code} status=${status}`);
 
     return ok(res, {
       verified: false,
       error: { code, message },
-      // Include Meta's error code for debugging (safe — not the token)
-      metaCode: metaError.code,
-      metaType: metaError.type,
+      metaCode: metaErr.code,
     });
   }
 }));
 
 /**
  * POST /api/v1/org/whatsapp/connect-v2
- * Stores credentials securely after verification
  */
-router.post('/connect-v2', asyncHandler(async (req, res) => {
+router.post('/connect-v2', asyncHandler(async (req: Request, res: Response) => {
   const { phoneNumberId, accessToken, businessId } = z.object({
-    phoneNumberId: z.string().min(3).regex(/^\d+$/),
+    phoneNumberId: z.string().min(3),
     accessToken: z.string().min(20),
     businessId: z.string().optional(),
   }).parse(req.body);
 
-  // Re-verify before storing
-  try {
-    const resp = await axios.get(
-      `https://graph.facebook.com/${env.META_API_VERSION}/${phoneNumberId}`,
-      {
-        params: { fields: 'display_phone_number,verified_name,quality_rating' },
-        headers: { Authorization: `Bearer ${accessToken}` },
-        timeout: 15000,
-      }
-    );
+  const { encrypt } = await import('../lib/crypto');
+  const { query } = await import('../db/pool');
 
-    await query(
-      `UPDATE organizations SET
-         wa_phone_number_id = $2,
-         wa_access_token = $3,
-         wa_business_id = $4,
-         wa_connected = TRUE
-       WHERE id = $1`,
-      [req.user!.orgId, phoneNumberId, encrypt(accessToken), businessId ?? null]
-    );
+  await query(
+    `UPDATE organizations SET wa_phone_number_id=$2, wa_access_token=$3, wa_business_id=$4, wa_connected=TRUE WHERE id=$1`,
+    [req.user!.orgId, phoneNumberId, encrypt(accessToken), businessId ?? null]
+  );
 
-    return ok(res, {
-      connected: true,
-      phoneNumberId,
-      wabaId: businessId || null,
-      info: {
-        display_phone_number: resp.data?.display_phone_number,
-        verified_name: resp.data?.verified_name,
-        quality_rating: resp.data?.quality_rating,
-      },
-    });
-  } catch (e: any) {
-    const metaError = e.response?.data?.error || {};
-    throw ApiError.badRequest(metaError.message || 'Could not verify credentials with Meta.');
-  }
+  return ok(res, { connected: true, phoneNumberId, wabaId: businessId || null });
 }));
 
 /**
  * GET /api/v1/org/whatsapp/setup-status
  */
-router.get('/setup-status', asyncHandler(async (req, res) => {
-  const org = await one<any>(`SELECT * FROM organizations WHERE id = $1`, [req.user!.orgId]);
-  if (!org) throw ApiError.notFound();
-
+router.get('/setup-status', asyncHandler(async (req: Request, res: Response) => {
+  const { one } = await import('../db/pool');
+  const org = await one<any>(`SELECT * FROM organizations WHERE id=$1`, [req.user!.orgId]);
   return ok(res, {
-    connected: org.wa_connected || false,
-    hasCredentials: !!(org.wa_phone_number_id && org.wa_access_token),
-    hasWabaId: !!org.wa_business_id,
-    phoneNumberId: org.wa_phone_number_id,
-    wabaId: org.wa_business_id,
-    webhookUrl: `${env.FRONTEND_URL.replace(':3000', ':8080')}/api/v1/webhooks/whatsapp`,
-    verifyToken: env.META_VERIFY_TOKEN,
+    connected: org?.wa_connected || false,
+    phoneNumberId: org?.wa_phone_number_id,
+    wabaId: org?.wa_business_id,
   });
 }));
 
 /**
  * GET /api/v1/org/whatsapp/health
  */
-router.get('/health', asyncHandler(async (_req, res) => {
+router.get('/health', asyncHandler(async (_req: Request, res: Response) => {
   return ok(res, {
     ok: true,
-    metaApiVersion: env.META_API_VERSION,
-    metaGraphUrl: env.META_GRAPH_URL,
-    hasVerifyToken: !!env.META_VERIFY_TOKEN,
+    metaVersion: env.META_API_VERSION,
     ts: new Date().toISOString(),
   });
 }));

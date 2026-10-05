@@ -17,7 +17,23 @@ import { errorHandler, notFoundHandler } from './middleware/error';
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet({ crossOriginResourcePolicy: false }));
-app.use(cors({ origin: [env.FRONTEND_URL, 'http://localhost:3000', 'http://localhost:3001'], credentials: true, methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] }));
+app.use(cors({
+  origin: (origin, callback) => {
+    const allowed = [
+      env.FRONTEND_URL,
+      'http://localhost:3000',
+      'http://localhost:3001',
+    ];
+    // Allow any vercel.app or trycloudflare.com subdomain (dev convenience)
+    if (!origin) return callback(null, true);
+    if (allowed.includes(origin)) return callback(null, true);
+    if (origin.endsWith('.vercel.app')) return callback(null, true);
+    if (origin.endsWith('.trycloudflare.com')) return callback(null, true);
+    return callback(null, true); // TEMP: allow all in dev
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+}));
 app.use(compression());
 app.use(cookieParser());
 app.use('/api/v1/webhooks/razorpay', express.raw({ type: 'application/json', limit: '2mb' }));
