@@ -19,8 +19,13 @@ import bspRoutes from './bsp';
 import adminRoutes from './admin';
 import aiTemplatesRoutes from './ai-templates';
 import testNumberRoutes from './test-number';
+import whatsappSetupRoutes from './whatsapp-setup';
 
 const router = Router();
+
+// IMPORTANT: /org/whatsapp registered BEFORE /org to avoid path conflicts
+router.use('/org/whatsapp', whatsappSetupRoutes);
+
 router.use('/auth', authRoutes);
 router.use('/org', orgRoutes);
 router.use('/contacts', contactRoutes);
@@ -41,4 +46,5 @@ router.use('/bsp', bspRoutes);
 router.use('/admin', adminRoutes);
 router.use('/ai-templates', aiTemplatesRoutes);
 router.use('/test-number', testNumberRoutes);
+
 export default router;

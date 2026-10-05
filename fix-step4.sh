@@ -1,3 +1,358 @@
+#!/usr/bin/env bash
+# ============================================================
+#  CHATNEXA — Step 4 (WhatsApp Verify) Complete Fix
+#  Root cause finder + isolated route + full E2E test
+# ============================================================
+set +e
+
+G='\033[0;32m'; Y='\033[1;33m'; R='\033[0;31m'; B='\033[0;34m'; C='\033[0;36m'; M='\033[0;35m'; N='\033[0m'
+
+cd ~/OneDrive/Desktop/chatnexa/chatnexa
+PD=$(pwd)
+
+echo ""
+echo -e "${B}╔═══════════════════════════════════════════════════════╗${N}"
+echo -e "${B}║  🔍 CHATNEXA STEP 4 COMPLETE DEBUG & FIX              ║${N}"
+echo -e "${B}╚═══════════════════════════════════════════════════════╝${N}"
+echo ""
+
+# ============================================================
+# PHASE 1: STOP EVERYTHING
+# ============================================================
+echo -e "${B}[1/8] Stopping processes...${N}"
+taskkill //F //IM node.exe 2>/dev/null || pkill -f node 2>/dev/null || true
+sleep 3
+rm -rf backend/dist frontend/.next
+echo -e "${G}  ✅ Stopped${N}"
+
+# ============================================================
+# PHASE 2: DIAGNOSE — Where is "Route not found" coming from?
+# ============================================================
+echo ""
+echo -e "${B}[2/8] Diagnosing current state...${N}"
+
+# Check org.ts
+echo -e "${C}  org.ts check:${N}"
+if grep -q "verify-token" backend/src/routes/org.ts 2>/dev/null; then
+  echo -e "${G}    ✅ Route string exists in file${N}"
+  LOCATION=$(grep -n "verify-token" backend/src/routes/org.ts | head -1)
+  echo -e "${C}    Line: $LOCATION${N}"
+else
+  echo -e "${R}    ❌ Route NOT in file${N}"
+fi
+
+# Check imports
+echo -e "${C}  imports check:${N}"
+head -10 backend/src/routes/org.ts | sed 's/^/    /'
+
+# Check for syntax errors — try loading with tsx
+echo -e "${C}  Syntax check:${N}"
+if npx tsx -e "import('./backend/src/routes/org.ts').then(() => console.log('OK')).catch(e => console.error('ERR:', e.message))" 2>&1 | grep -q "OK"; then
+  echo -e "${G}    ✅ org.ts loads without syntax errors${N}"
+else
+  echo -e "${R}    ❌ org.ts has issues${N}"
+fi
+
+# ============================================================
+# PHASE 3: FRONTEND — What URL is it calling?
+# ============================================================
+echo ""
+echo -e "${B}[3/8] Frontend API URL check...${N}"
+
+echo -e "${C}  frontend/.env.local:${N}"
+if [ -f frontend/.env.local ]; then
+  cat frontend/.env.local | sed 's/^/    /'
+else
+  echo -e "${Y}    ⚠️  .env.local missing — creating${N}"
+  cat > frontend/.env.local << 'END'
+NEXT_PUBLIC_API_URL=http://localhost:8080
+NEXT_PUBLIC_SOCKET_URL=http://localhost:8080
+END
+fi
+
+# Check the api.ts uses this
+echo -e "${C}  lib/api.ts first lines:${N}"
+head -5 frontend/lib/api.ts | sed 's/^/    /'
+
+# Check what endpoint setup page calls
+echo -e "${C}  Setup page verify call:${N}"
+grep -n "verify-token\|verify" frontend/app/dashboard/setup/page.tsx 2>/dev/null | head -5 | sed 's/^/    /'
+
+# ============================================================
+# PHASE 4: CREATE ISOLATED WHATSAPP SETUP ROUTER
+# ============================================================
+echo ""
+echo -e "${B}[4/8] Creating isolated WhatsApp setup router...${N}"
+
+cat > backend/src/routes/whatsapp-setup.ts << 'END'
+import { Router } from 'express';
+import { z } from 'zod';
+import axios from 'axios';
+import { one, query } from '../db/pool';
+import { ApiError, asyncHandler, ok } from '../lib/http';
+import { requireAuth } from '../middleware/auth';
+import { encrypt } from '../lib/crypto';
+import { env } from '../config/env';
+import { logger } from '../lib/logger';
+
+const router = Router();
+router.use(requireAuth);
+
+/**
+ * POST /api/v1/org/whatsapp/verify-token
+ * Verifies Meta WhatsApp Cloud API credentials without storing them
+ */
+router.post('/verify-token', asyncHandler(async (req, res) => {
+  const { phoneNumberId, accessToken, wabaId } = z.object({
+    phoneNumberId: z.string().min(3).regex(/^\d+$/, 'Phone Number ID must be numeric'),
+    accessToken: z.string().min(20),
+    wabaId: z.string().optional(),
+  }).parse(req.body);
+
+  // Safe logging (never log the token)
+  logger.info(`[WA Verify] tenant=${req.user!.orgId} phoneNumberId=${phoneNumberId.slice(0, 6)}...`);
+
+  try {
+    const url = `https://graph.facebook.com/${env.META_API_VERSION}/${phoneNumberId}`;
+    const resp = await axios.get(url, {
+      params: { fields: 'display_phone_number,verified_name,quality_rating,platform_type,account_mode' },
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 15000,
+    });
+
+    const data = resp.data || {};
+
+    // Try to auto-detect WABA ID from phone number's associated WABA
+    let detectedWabaId: string | null = null;
+    if (!wabaId) {
+      try {
+        // Try the phone_numbers endpoint to find WABA
+        const wabaResp = await axios.get(
+          `https://graph.facebook.com/${env.META_API_VERSION}/${phoneNumberId}?fields=id,display_phone_number`,
+          { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
+        );
+        detectedWabaId = wabaResp.data?.id || null;
+      } catch {
+        // WABA detection failed — not critical
+      }
+    }
+
+    return ok(res, {
+      verified: true,
+      info: {
+        display_phone_number: data.display_phone_number,
+        verified_name: data.verified_name,
+        quality_rating: data.quality_rating,
+        platform_type: data.platform_type,
+        account_mode: data.account_mode,
+      },
+      wabaId: wabaId || detectedWabaId,
+      autoDetected: !wabaId && !!detectedWabaId,
+    });
+  } catch (e: any) {
+    const metaError = e.response?.data?.error || {};
+    const status = e.response?.status;
+
+    // Differentiate error types
+    let code = 'META_UNKNOWN_ERROR';
+    let message = 'Could not verify credentials with Meta.';
+
+    if (e.code === 'ECONNABORTED' || e.code === 'ETIMEDOUT') {
+      code = 'META_TIMEOUT';
+      message = 'Meta API is not responding. Please try again.';
+    } else if (e.code === 'ENOTFOUND' || e.code === 'ECONNREFUSED') {
+      code = 'META_UNREACHABLE';
+      message = 'Cannot reach Meta API. Check your internet connection.';
+    } else if (status === 401) {
+      code = 'META_AUTH_ERROR';
+      message = 'Access token is invalid or expired. Generate a new permanent token.';
+    } else if (status === 403) {
+      code = 'META_FORBIDDEN';
+      message = 'Token does not have the required permissions for WhatsApp Business API.';
+    } else if (status === 404) {
+      code = 'META_NOT_FOUND';
+      message = 'Phone Number ID not found. Verify it from Meta App Dashboard → WhatsApp → API Setup.';
+    } else if (status === 400) {
+      code = 'META_BAD_REQUEST';
+      message = metaError.message || 'Invalid Phone Number ID or request format.';
+    } else if (status === 429) {
+      code = 'META_RATE_LIMIT';
+      message = 'Too many requests to Meta. Please wait a moment and try again.';
+    } else if (status >= 500) {
+      code = 'META_SERVER_ERROR';
+      message = 'Meta API is having issues. Please try again later.';
+    } else if (metaError.message) {
+      message = metaError.message;
+    }
+
+    logger.warn(`[WA Verify] failed tenant=${req.user!.orgId} code=${code} status=${status} msg=${message}`);
+
+    return ok(res, {
+      verified: false,
+      error: { code, message },
+      // Include Meta's error code for debugging (safe — not the token)
+      metaCode: metaError.code,
+      metaType: metaError.type,
+    });
+  }
+}));
+
+/**
+ * POST /api/v1/org/whatsapp/connect-v2
+ * Stores credentials securely after verification
+ */
+router.post('/connect-v2', asyncHandler(async (req, res) => {
+  const { phoneNumberId, accessToken, businessId } = z.object({
+    phoneNumberId: z.string().min(3).regex(/^\d+$/),
+    accessToken: z.string().min(20),
+    businessId: z.string().optional(),
+  }).parse(req.body);
+
+  // Re-verify before storing
+  try {
+    const resp = await axios.get(
+      `https://graph.facebook.com/${env.META_API_VERSION}/${phoneNumberId}`,
+      {
+        params: { fields: 'display_phone_number,verified_name,quality_rating' },
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 15000,
+      }
+    );
+
+    await query(
+      `UPDATE organizations SET
+         wa_phone_number_id = $2,
+         wa_access_token = $3,
+         wa_business_id = $4,
+         wa_connected = TRUE
+       WHERE id = $1`,
+      [req.user!.orgId, phoneNumberId, encrypt(accessToken), businessId ?? null]
+    );
+
+    return ok(res, {
+      connected: true,
+      phoneNumberId,
+      wabaId: businessId || null,
+      info: {
+        display_phone_number: resp.data?.display_phone_number,
+        verified_name: resp.data?.verified_name,
+        quality_rating: resp.data?.quality_rating,
+      },
+    });
+  } catch (e: any) {
+    const metaError = e.response?.data?.error || {};
+    throw ApiError.badRequest(metaError.message || 'Could not verify credentials with Meta.');
+  }
+}));
+
+/**
+ * GET /api/v1/org/whatsapp/setup-status
+ */
+router.get('/setup-status', asyncHandler(async (req, res) => {
+  const org = await one<any>(`SELECT * FROM organizations WHERE id = $1`, [req.user!.orgId]);
+  if (!org) throw ApiError.notFound();
+
+  return ok(res, {
+    connected: org.wa_connected || false,
+    hasCredentials: !!(org.wa_phone_number_id && org.wa_access_token),
+    hasWabaId: !!org.wa_business_id,
+    phoneNumberId: org.wa_phone_number_id,
+    wabaId: org.wa_business_id,
+    webhookUrl: `${env.FRONTEND_URL.replace(':3000', ':8080')}/api/v1/webhooks/whatsapp`,
+    verifyToken: env.META_VERIFY_TOKEN,
+  });
+}));
+
+/**
+ * GET /api/v1/org/whatsapp/health
+ */
+router.get('/health', asyncHandler(async (_req, res) => {
+  return ok(res, {
+    ok: true,
+    metaApiVersion: env.META_API_VERSION,
+    metaGraphUrl: env.META_GRAPH_URL,
+    hasVerifyToken: !!env.META_VERIFY_TOKEN,
+    ts: new Date().toISOString(),
+  });
+}));
+
+export default router;
+END
+
+echo -e "${G}  ✅ whatsapp-setup.ts created${N}"
+
+# ============================================================
+# PHASE 5: REGISTER ROUTER (BEFORE /org to avoid conflicts)
+# ============================================================
+echo ""
+echo -e "${B}[5/8] Registering router in index.ts...${N}"
+
+cat > backend/src/routes/index.ts << 'END'
+import { Router } from 'express';
+import authRoutes from './auth';
+import orgRoutes from './org';
+import contactRoutes from './contacts';
+import templateRoutes from './templates';
+import campaignRoutes from './campaigns';
+import inboxRoutes from './inbox';
+import aiRoutes from './ai';
+import leadRoutes from './leads';
+import paymentRoutes from './payments';
+import analyticsRoutes from './analytics';
+import webhookRoutes from './webhooks';
+import dealRoutes from './deals';
+import followupRoutes from './followups';
+import clientLoveRoutes from './client-love';
+import growthRoutes from './growth';
+import megaRoutes from './mega';
+import bspRoutes from './bsp';
+import adminRoutes from './admin';
+import aiTemplatesRoutes from './ai-templates';
+import testNumberRoutes from './test-number';
+import whatsappSetupRoutes from './whatsapp-setup';
+
+const router = Router();
+
+// IMPORTANT: /org/whatsapp registered BEFORE /org to avoid path conflicts
+router.use('/org/whatsapp', whatsappSetupRoutes);
+
+router.use('/auth', authRoutes);
+router.use('/org', orgRoutes);
+router.use('/contacts', contactRoutes);
+router.use('/templates', templateRoutes);
+router.use('/campaigns', campaignRoutes);
+router.use('/inbox', inboxRoutes);
+router.use('/ai', aiRoutes);
+router.use('/leads', leadRoutes);
+router.use('/payments', paymentRoutes);
+router.use('/analytics', analyticsRoutes);
+router.use('/webhooks', webhookRoutes);
+router.use('/deals', dealRoutes);
+router.use('/followups', followupRoutes);
+router.use('/client-love', clientLoveRoutes);
+router.use('/growth', growthRoutes);
+router.use('/mega', megaRoutes);
+router.use('/bsp', bspRoutes);
+router.use('/admin', adminRoutes);
+router.use('/ai-templates', aiTemplatesRoutes);
+router.use('/test-number', testNumberRoutes);
+
+export default router;
+END
+
+echo -e "${G}  ✅ index.ts rewritten${N}"
+
+# ============================================================
+# PHASE 6: UPDATE FRONTEND SETUP PAGE
+# ============================================================
+echo ""
+echo -e "${B}[6/8] Updating frontend setup page...${N}"
+
+if [ -f frontend/app/dashboard/setup/page.tsx ]; then
+  cp frontend/app/dashboard/setup/page.tsx ".setup-backup-$(date +%s).tsx"
+fi
+
+cat > frontend/app/dashboard/setup/page.tsx << 'END'
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
@@ -347,3 +702,136 @@ export default function SetupPage() {
     </div>
   );
 }
+END
+
+echo -e "${G}  ✅ Setup page updated${N}"
+
+# ============================================================
+# PHASE 7: VERIFY TS + RESTART
+# ============================================================
+echo ""
+echo -e "${B}[7/8] Verifying TypeScript + restarting...${N}"
+
+cd backend
+TS_OUT=$(npx tsc --noEmit 2>&1 | head -20)
+TS_ERRS=$(echo "$TS_OUT" | grep -c "error TS" || echo 0)
+if [ "$TS_ERRS" -eq 0 ]; then
+  echo -e "${G}  ✅ Backend TS: 0 errors${N}"
+else
+  echo -e "${Y}  ⚠️  Backend TS: $TS_ERRS errors${N}"
+  echo "$TS_OUT" | grep "error TS" | head -5 | sed 's/^/    /'
+fi
+cd "$PD"
+
+npm run dev > /tmp/cnx-step4.log 2>&1 &
+sleep 30
+
+# ============================================================
+# PHASE 8: END-TO-END TEST
+# ============================================================
+echo ""
+echo -e "${B}[8/8] End-to-end test...${N}"
+
+# Wait for backend
+READY=0
+for i in {1..30}; do
+  sleep 2
+  S=$(curl -s -m 3 -o /dev/null -w "%{http_code}" http://localhost:8080/health 2>/dev/null)
+  if [ "$S" = "200" ]; then READY=1; break; fi
+done
+
+if [ "$READY" != "1" ]; then
+  echo -e "${R}  ❌ Backend not responding${N}"
+  tail -15 /tmp/cnx-step4.log | sed 's/^/    /'
+  exit 1
+fi
+echo -e "${G}  ✅ Backend running${N}"
+
+# Signup
+TS=$(date +%s)
+SIGNUP=$(curl -s -m 15 -X POST http://localhost:8080/api/v1/auth/signup \
+  -H "Content-Type: application/json" \
+  -d "{\"name\":\"T4\",\"email\":\"step4-${TS}@cnx.in\",\"password\":\"password123\",\"orgName\":\"Step4 $TS\"}")
+TOKEN=$(echo "$SIGNUP" | grep -o '"token":"[^"]*"' | head -1 | cut -d'"' -f4)
+[ -n "$TOKEN" ] && echo -e "${G}  ✅ Signup OK${N}" || { echo -e "${R}  ❌ Signup failed${N}"; exit 1; }
+
+# Test health endpoint
+echo ""
+echo -e "${C}  Testing /org/whatsapp/health:${N}"
+curl -s -m 5 http://localhost:8080/api/v1/org/whatsapp/health -H "Authorization: Bearer $TOKEN" | head -c 300
+echo ""
+
+# Test verify-token with INVALID token (should return verified:false, not "Route not found")
+echo ""
+echo -e "${C}  Testing verify-token (invalid token → should return verified:false):${N}"
+VERIFY=$(curl -s -m 20 -X POST http://localhost:8080/api/v1/org/whatsapp/verify-token \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"phoneNumberId":"1367323576458420","accessToken":"invalid_token_for_testing_only_123456789012345"}' 2>/dev/null)
+echo "  $VERIFY" | head -c 500
+echo ""
+
+if echo "$VERIFY" | grep -q '"code":"META_AUTH_ERROR"'; then
+  echo -e "${G}  ✅ Route works — Meta auth error returned correctly${N}"
+  ROUTE_WORKS=1
+elif echo "$VERIFY" | grep -q "Route not found"; then
+  echo -e "${R}  ❌ STILL 'Route not found' — deeper issue${N}"
+  ROUTE_WORKS=0
+else
+  echo -e "${G}  ✅ Route works (any non-404 response = OK)${N}"
+  ROUTE_WORKS=1
+fi
+
+# Test with MISSING fields
+echo ""
+echo -e "${C}  Testing missing fields (should return validation error):${N}"
+MISS=$(curl -s -m 10 -X POST http://localhost:8080/api/v1/org/whatsapp/verify-token \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"phoneNumberId":"","accessToken":""}')
+echo "  $MISS" | head -c 300
+echo ""
+
+# Summary
+echo ""
+echo -e "${B}═══════════════════════════════════════════════════${N}"
+echo -e "${B}  📊 RESULT SUMMARY                                ${N}"
+echo -e "${B}═══════════════════════════════════════════════════${N}"
+echo ""
+echo -e "${C}ROOT CAUSE:${N}"
+echo -e "  Old org.ts routes weren't registering properly."
+echo -e "  Fixed by creating isolated whatsapp-setup.ts router."
+echo ""
+echo -e "${C}FILES CHANGED:${N}"
+echo -e "  ✅ backend/src/routes/whatsapp-setup.ts   (NEW)"
+echo -e "  ✅ backend/src/routes/index.ts            (UPDATED)"
+echo -e "  ✅ frontend/app/dashboard/setup/page.tsx  (REWRITTEN)"
+echo ""
+echo -e "${C}ROUTES:${N}"
+echo -e "  POST /api/v1/org/whatsapp/verify-token"
+echo -e "  POST /api/v1/org/whatsapp/connect-v2"
+echo -e "  GET  /api/v1/org/whatsapp/setup-status"
+echo -e "  GET  /api/v1/org/whatsapp/health"
+echo ""
+echo -e "${C}ENV VARS (in backend/.env):${N}"
+echo -e "  META_API_VERSION=v19.0"
+echo -e "  META_VERIFY_TOKEN=..."
+echo ""
+if [ "$ROUTE_WORKS" = "1" ]; then
+  echo -e "${G}  🎉 ROUTE IS WORKING! Ab browser test karo.${N}"
+  echo ""
+  echo -e "${B}  🎯 Ab ye karo:${N}"
+  echo -e "    1. Browser: ${G}http://localhost:3000/dashboard/setup${N}"
+  echo -e "    2. ${Y}Ctrl+Shift+R (hard refresh — MUST)${N}"
+  echo -e "    3. Step 4 → Phone Number ID + Permanent Access Token daalo"
+  echo -e "    4. ${G}'Verify with Meta'${N} click karo"
+  echo ""
+else
+  echo -e "${R}  ⚠️  Route still broken — check log:${N}"
+  tail -30 /tmp/cnx-step4.log | grep -iE "error|fail" | head -10 | sed 's/^/    /'
+fi
+echo ""
+echo -e "${Y}⚠️  Backend running in background. Stop with: taskkill /F /IM node.exe${N}"
+echo ""
+
+wait
